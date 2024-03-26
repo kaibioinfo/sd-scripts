@@ -157,6 +157,17 @@ class ImageInfo:
         self.text_encoder_outputs1: Optional[torch.Tensor] = None
         self.text_encoder_outputs2: Optional[torch.Tensor] = None
         self.text_encoder_pool2: Optional[torch.Tensor] = None
+        # Image Slider, optional 
+        self.network_scale = 1
+        self.scanCaptionForScaleParameter()
+
+    def scanCaptionForScaleParameter(self):    
+        scaleRegularExpression = re.compile("--scale\\(\\s*([+-]?\\s*\\d+(?:\\.\\d+)?)\\s*\\)")
+        match = re.search(scaleRegularExpression, self.caption)
+        if match:
+            self.network_scale = float(match.group(1))
+            self.caption = re.sub(scaleRegularExpression, "", self.caption)
+
 
 
 class BucketManager:
@@ -1116,9 +1127,14 @@ class BaseDataset(torch.utils.data.Dataset):
         text_encoder_outputs1_list = []
         text_encoder_outputs2_list = []
         text_encoder_pool2_list = []
+        # per-sample network weights
+        network_scale = []
 
         for image_key in bucket[image_index : image_index + bucket_batch_size]:
             image_info = self.image_data[image_key]
+
+            network_scale.append(image_info.network_scale)
+
             subset = self.image_to_subset[image_key]
             loss_weights.append(
                 self.prior_loss_weight if image_info.is_reg else 1.0
@@ -1288,7 +1304,7 @@ class BaseDataset(torch.utils.data.Dataset):
         example["target_sizes_hw"] = torch.stack([torch.LongTensor(x) for x in target_sizes_hw])
         example["flippeds"] = flippeds
 
-        example["network_multipliers"] = torch.FloatTensor([self.network_multiplier] * len(captions))
+        example["network_multipliers"] = torch.FloatTensor(network_scale)#torch.FloatTensor([self.network_multiplier] * len(captions))
 
         if self.debug_dataset:
             example["image_keys"] = bucket[image_index : image_index + self.batch_size]
@@ -1304,6 +1320,7 @@ class BaseDataset(torch.utils.data.Dataset):
         bucket_reso = None
         flip_aug = None
         random_crop = None
+        network_multipliers = []
 
         for image_key in bucket[image_index : image_index + bucket_batch_size]:
             image_info = self.image_data[image_key]
@@ -1338,6 +1355,8 @@ class BaseDataset(torch.utils.data.Dataset):
             input_ids2_list.append(input_ids2)
             absolute_paths.append(image_info.absolute_path)
             resized_sizes.append(image_info.resized_size)
+            network_multipliers.append(image_info.network_multiplier)
+
 
         example = {}
 
@@ -1353,6 +1372,7 @@ class BaseDataset(torch.utils.data.Dataset):
         example["flip_aug"] = flip_aug
         example["random_crop"] = random_crop
         example["bucket_reso"] = bucket_reso
+        example["network_multipliers"] = image_info.network_multiplier
         return example
 
 
